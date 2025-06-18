@@ -2,10 +2,46 @@ from django.shortcuts import render
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from home.models import Person
-from home.serializers import PeopleSerializer,LoginSerializer
+from home.serializers import PeopleSerializer,LoginSerializer,RegisterSerializer
 from rest_framework.views import APIView
 from rest_framework import viewsets
+from rest_framework import status
+from django.contrib.auth import authenticate
+from rest_framework.authtoken.models import Token
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import TokenAuthentication
+from django.core.paginator import Paginator
+from rest_framework.decorators import action
 
+class LoginAPI(APIView):
+  def post(self,request):
+    data = request.data
+    serializer = LoginSerializer(data=data)
+    
+    if not serializer.is_valid():
+      return Response({'status':False,'message':serializer.errors},status=status.HTTP_400_BAD_REQUEST)
+    
+    user = authenticate(username=serializer.data['username'],password=serializer.data['password'])
+    
+    if not user:
+       return Response({'status':False,'message':'Invalid credentials'},status=status.HTTP_400_BAD_REQUEST)
+     
+    token,_ = Token.objects.get_or_create(user=user)
+    
+    return Response({'status':True,'message':'user login', 'token':str(token)},status=status.HTTP_201_CREATED)
+  
+class RegisterAPI(APIView):
+  def post(self, request):
+    data = request.data
+    serializer = RegisterSerializer(data = data)
+    
+    if not serializer.is_valid():
+      return Response({'status':False,'message':serializer.errors},status=status.HTTP_400_BAD_REQUEST)
+    
+    serializer.save()
+    
+    return Response({'status':True,'message':'user created'},status=status.HTTP_201_CREATED)
+      
 @api_view(['GET','POST','PUT'])
 def index(request):
 
@@ -39,10 +75,22 @@ def login(request):
   return Response(serializer.errors)
   
 class PersonAPI(APIView):
+  authentication_classes = [TokenAuthentication]
+  permission_classes = [IsAuthenticated]
   def get(self, request):
-    objs = Person.objects.filter(color__isnull=False)
-    serializer = PeopleSerializer(objs, many = True)
-    return Response(serializer.data)
+    try:
+      objs = Person.objects.filter(color__isnull=False)
+      page = request.GET.get('page',1)
+      page_size = 2
+      paginator = Paginator(objs,page_size)
+      serializer = PeopleSerializer(paginator.page(page), many = True)
+      return Response(serializer.data)
+    except Exception as e:
+      return Response({
+        "status":False,
+        "message":"Invalid page"
+    })
+    # serializer = PeopleSerializer(objs, many = True)
   
   def post(self,request):
     data = request.data
@@ -123,16 +171,24 @@ def people(request):
 class PeopleViewSet(viewsets.ModelViewSet):
   serializer_class = PeopleSerializer
   queryset = Person.objects.all()
+  http_method_names = ['get','post']
 
   def list(self,request):
     search = request.GET.get('search')
     queryset = self.queryset
 
     if search:
-      queryset = queryset.filter(name__startwith = search)
+      queryset = queryset.filter(name__startswith = search)
 
     serializer = PeopleSerializer(queryset,many=True) 
-    return Response({'status':200,'data':serializer.data})
+    return Response({'status':200,'data':serializer.data},status=status.HTTP_200_OK)
+  
+  @action(detail=True,methods=['post'])
+  def send_mail_to_person(self,request,pk):
+    return Response({
+      "status":True,
+      "message":"email sent successfully"
+    })
 
 
 
